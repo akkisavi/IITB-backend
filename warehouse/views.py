@@ -224,6 +224,13 @@ class ShuttleView(APIView):
         shuttle = _shuttle()
         for field, value in changes.items():
             setattr(shuttle, field, value)
+        if test_to:
+            from .alerts import send_low_battery_alert
+
+            if settings.EMAIL_BACKEND == "django.core.mail.backends.console.EmailBackend" or not send_low_battery_alert(
+                shuttle.identifier, shuttle.battery_percent, [test_to], test=True
+            ):
+                raise ApiError(503, "email_delivery_failed", "The email provider did not accept the test alert. Check server mail settings and logs.")
         shuttle._test_alert_to = test_to
         shuttle.save(update_fields=[*changes, "updated_at"])
         data = shuttle_data(shuttle)

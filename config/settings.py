@@ -168,10 +168,13 @@ LOGGING = {
     "loggers": {"django.db.backends": {"level": "WARNING"}},
 }
 
-# Email (low-battery alerts). Credentials come from env only; never hard-code them.
+# Email. Resend uses HTTPS on hosted free services; SMTP remains available locally.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
 MAILER_MAIL = os.environ.get("MAILER_MAIL", "").strip()
 EMAIL_BACKEND = (
-    "django.core.mail.backends.smtp.EmailBackend" if MAILER_MAIL else "django.core.mail.backends.console.EmailBackend"
+    "warehouse.mail_backend.ResendEmailBackend" if RESEND_API_KEY
+    else "django.core.mail.backends.smtp.EmailBackend" if MAILER_MAIL
+    else "django.core.mail.backends.console.EmailBackend"
 )
 EMAIL_HOST = os.environ.get("MAILER_ADDRESS", "smtp.gmail.com").strip()
 EMAIL_PORT = int(os.environ.get("MAILER_PORT", "587"))
@@ -179,9 +182,10 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = MAILER_MAIL
 EMAIL_HOST_PASSWORD = os.environ.get("MAILER_PASS", "").replace(" ", "")
 EMAIL_TIMEOUT = 10
-DEFAULT_FROM_EMAIL = f'{os.environ.get("MAILER_FROM_NAME", "Alert").strip()} <{MAILER_MAIL or "noreply@localhost"}>'
+EMAIL_FROM_ADDRESS = os.environ.get("EMAIL_FROM_ADDRESS", "").strip() or MAILER_MAIL
+DEFAULT_FROM_EMAIL = f'{os.environ.get("MAILER_FROM_NAME", "Alert").strip()} <{EMAIL_FROM_ADDRESS or "noreply@localhost"}>'
 # Comma-separated recipients; defaults to the sender mailbox.
-LOW_BATTERY_ALERT_TO = env_list("LOW_BATTERY_ALERT_TO", MAILER_MAIL)
+LOW_BATTERY_ALERT_TO = env_list("LOW_BATTERY_ALERT_TO", EMAIL_FROM_ADDRESS)
 
 DEFAULT_RESET_ORIGIN = f"https://{RENDER_HOST}" if RENDER_HOST and WHITENOISE_ROOT else "http://127.0.0.1:5173"
 PASSWORD_RESET_URL = os.environ.get("PASSWORD_RESET_URL", f"{DEFAULT_RESET_ORIGIN}/reset-password").strip()

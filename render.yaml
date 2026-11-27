@@ -29,3 +29,9 @@ services:
         sync: false
       - key: EVAL_TECHNICIAN_PASSWORD
         sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false   # sender on a verified Resend domain
+      - key: LOW_BATTERY_ALERT_TO
+        sync: false   # default recipient for automatic alerts

@@ -11,7 +11,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from accounts.models import UserProfile
-from warehouse.models import DailyOccupancySnapshot, Location, OperationLog, Pallet
+from warehouse.models import DailyOccupancySnapshot, Location, OperationLog, Pallet, Shuttle
 
 User = get_user_model()
 PW = "Unit-Test-Pass-123"
@@ -357,6 +357,46 @@ class TestAlertEmailTests(BaseAPITest):
         high = self.client.patch("/api/shuttle/", {"battery_percent": 50, "test_alert_email": "tester@example.com"}, format="json")
         self.assertEqual(high.status_code, 400)
         self.assertIn("test_alert_email", high.json()["errors"])
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend")
+    def test_test_email_reports_missing_mail_provider(self):
+        self.as_user(self.tech)
+        res = self.client.patch("/api/shuttle/", {"battery_percent": 15, "test_alert_email": "tester@example.com"}, format="json")
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(res.json()["code"], "email_delivery_failed")
+        self.assertNotEqual(Shuttle.objects.first().battery_percent, 15)
+
+    @override_settings(EMAIL_BACKEND="warehouse.mail_backend.ResendEmailBackend",
+                       RESEND_API_KEY="test-key", DEFAULT_FROM_EMAIL="Alerts <alerts@example.com>")
+    def test_resend_acceptance_and_rejection_are_reported(self):
+        from unittest.mock import patch
+        from urllib.error import HTTPError
+
+        self.as_user(self.tech)
+
+        class Accepted:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        with patch("warehouse.mail_backend.urlopen", return_value=Accepted()) as send:
+            res = self.client.patch("/api/shuttle/", {"battery_percent": 15, "test_alert_email": "tester@example.com"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["test_alert_sent_to"], "tester@example.com")
+        request = send.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.resend.com/emails")
+        self.assertIn(b'"to": ["tester@example.com"]', request.data)
+
+        error = HTTPError("https://api.resend.com/emails", 403, "forbidden", {}, None)
+        with patch("warehouse.mail_backend.urlopen", side_effect=error):
+            res = self.client.patch("/api/shuttle/", {"battery_percent": 12, "test_alert_email": "tester@example.com"}, format="json")
+        self.assertEqual(res.status_code, 503)
+        self.assertEqual(res.json()["code"], "email_delivery_failed")
+        self.assertEqual(Shuttle.objects.first().battery_percent, 15)
 
 
 class BatterySimulationTests(BaseAPITest):

@@ -54,8 +54,10 @@ Readiness: `GET /health/` returns `{"status":"ok"}` without auth. `.env.example`
 | `CSRF_TRUSTED_ORIGINS` | unset | comma list |
 | `EVAL_{ADMIN,AUDITOR,TECHNICIAN}_USERNAME` | `demo_admin` / `demo_auditor` / `demo_technician` | |
 | `EVAL_{ADMIN,AUDITOR,TECHNICIAN}_PASSWORD` | unset | 12-128 chars, no whitespace; never commit |
-| `MAILER_ADDRESS`, `MAILER_PORT`, `MAILER_MAIL`, `MAILER_PASS`, `MAILER_FROM_NAME` | unset | SMTP for low-battery alerts; without `MAILER_MAIL` alerts print to the console |
-| `LOW_BATTERY_ALERT_TO` | `MAILER_MAIL` | comma list of alert recipients |
+| `RESEND_API_KEY` | unset | Resend HTTPS email API; set on Render free to send alerts and password resets |
+| `EMAIL_FROM_ADDRESS` | `MAILER_MAIL` | Sender on a verified Resend domain when using the API |
+| `MAILER_ADDRESS`, `MAILER_PORT`, `MAILER_MAIL`, `MAILER_PASS`, `MAILER_FROM_NAME` | unset | SMTP for local or paid hosting; without an API key or SMTP user, emails print to the console |
+| `LOW_BATTERY_ALERT_TO` | `EMAIL_FROM_ADDRESS` | comma list of automatic alert recipients |
 
 ## Local vs hosted
 | | Local / evaluation | Hosted |
@@ -67,6 +69,8 @@ Readiness: `GET /health/` returns `{"status":"ok"}` without auth. `.env.example`
 
 ## Deployment (free, no payment card)
 Stack: **Render free web service** (API, SQLite) + **Vercel Hobby** (UI).
+
+Render free web services block outbound SMTP ports 25, 465 and 587. To send email there, add a verified sending domain in Resend, then set `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS` and `LOW_BATTERY_ALERT_TO` in the Render service environment and redeploy. `EMAIL_FROM_ADDRESS` must use the verified domain. The Shuttle test alert reports an error if the provider rejects the send; a success means the provider accepted it, not that the recipient inbox has delivered it.
 
 **Data persistence:** Render's free filesystem is ephemeral. The build runs `migrate` and `seed_demo`, so every deploy, restart or wake from sleep starts again from the seeded demo data, and changes made through the app (loads, unloads, new users) are lost. For data that must last, attach a persistent disk (paid) and point `SQLITE_PATH` at it.
 
