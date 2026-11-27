@@ -1,6 +1,8 @@
 import csv
 
+from django.conf import settings
 from django.db.models import Count, Q, Sum
+from django.http import HttpResponseRedirect
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -29,6 +31,25 @@ class HealthView(APIView):
 
     def get(self, request):
         return Response({"status": "ok"})
+
+
+class RootView(APIView):
+    """The API's own address: send people to the website when one is configured, else describe the API."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        frontend = getattr(settings, "FRONTEND_URL", "")
+        if frontend:
+            return HttpResponseRedirect(frontend)
+        return Response({
+            "service": "Warehouse Console API",
+            "status": "ok",
+            "message": "This is the server behind the Warehouse Console website. Open the website to use the app.",
+            "health": request.build_absolute_uri("/health/"),
+            "login": request.build_absolute_uri("/api/auth/login/"),
+        })
 
 
 class LocationListView(APIView):

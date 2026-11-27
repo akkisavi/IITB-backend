@@ -4,6 +4,7 @@ from accounts import views as acc
 from warehouse import views as wh
 
 urlpatterns = [
+    path("", wh.RootView.as_view(), name="root"),
     path("health/", wh.HealthView.as_view(), name="health"),
     path("api/auth/login/", acc.LoginView.as_view(), name="login"),
     path("api/auth/logout/", acc.LogoutView.as_view(), name="logout"),

@@ -186,3 +186,6 @@ PASSWORD_RESET_TIMEOUT = 60 * 60
 
 # Simulated shuttle battery (warehouse/simulation.py). Set SHUTTLE_SIMULATION=0 to turn it off.
 SHUTTLE_SIMULATION = env_bool("SHUTTLE_SIMULATION", True)
+
+# Optional: the website address. When set, visiting the API root redirects there.
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "").strip()
