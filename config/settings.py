@@ -59,7 +59,8 @@ if not SECRET_KEY:
     if DEBUG or LOCAL_MODE:
         SECRET_KEY = "django-insecure-dev-only-key-do-not-use-in-production"
     else:
-        raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when hosting (DJANGO_ALLOWED_HOSTS is not local) and DJANGO_DEBUG is off.")
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set when hosting (DJANGO_ALLOWED_HOSTS is not local) and DJANGO_DEBUG is off.")
 
 
 INSTALLED_APPS = [
@@ -115,7 +116,8 @@ if DATABASE_URL:
     if database_uri.scheme not in ("postgres", "postgresql") or not all(
         (database_uri.hostname, database_uri.username, database_uri.path.lstrip("/"))
     ):
-        raise ImproperlyConfigured("DATABASE_URL must be a PostgreSQL connection URL.")
+        raise ImproperlyConfigured(
+            "DATABASE_URL must be a PostgreSQL connection URL.")
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -139,7 +141,8 @@ else:
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 12}},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -153,7 +156,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 FRONTEND_DIST = BASE_DIR.parent / "warehouse-ui" / "dist"
-WHITENOISE_ROOT = str(FRONTEND_DIST) if (FRONTEND_DIST / "index.html").is_file() else None
+WHITENOISE_ROOT = str(FRONTEND_DIST) if (
+    FRONTEND_DIST / "index.html").is_file() else None
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
@@ -169,11 +173,14 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "warehouse.exceptions.api_exception_handler",
 }
 
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
+CORS_ALLOWED_ORIGINS = env_list(
+    "CORS_ALLOWED_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173")
 CORS_ALLOWED_ORIGIN_REGEXES = (
-    [r"^https?://localhost(:\d+)?$", r"^https?://127\.0\.0\.1(:\d+)?$"] if (DEBUG or LOCAL_MODE) else []
+    [r"^https?://localhost(:\d+)?$",
+     r"^https?://127\.0\.0\.1(:\d+)?$"] if (DEBUG or LOCAL_MODE) else []
 )
-CORS_ALLOW_HEADERS = ["accept", "authorization", "content-type", "idempotency-key", "origin", "x-requested-with"]
+CORS_ALLOW_HEADERS = ["accept", "authorization", "content-type",
+                      "idempotency-key", "origin", "x-requested-with"]
 CORS_EXPOSE_HEADERS = ["idempotent-replayed"]
 
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
@@ -190,27 +197,62 @@ LOGGING = {
     "loggers": {"django.db.backends": {"level": "WARNING"}},
 }
 
-# Email. Resend uses HTTPS on hosted free services; SMTP remains available locally.
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "").strip()
+GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "").strip()
+GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "").strip()
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "").strip()
+GMAIL_SENDER_EMAIL = os.environ.get("GMAIL_SENDER_EMAIL", "").strip()
+
+GMAIL_API_ENABLED = all([
+    GMAIL_CLIENT_ID,
+    GMAIL_CLIENT_SECRET,
+    GMAIL_REFRESH_TOKEN,
+    GMAIL_SENDER_EMAIL,
+])
+
 MAILER_MAIL = os.environ.get("MAILER_MAIL", "").strip()
+
 EMAIL_BACKEND = (
-    "warehouse.mail_backend.ResendEmailBackend" if RESEND_API_KEY
-    else "django.core.mail.backends.smtp.EmailBackend" if MAILER_MAIL
+    "warehouse.mail_backend.GmailEmailBackend"
+    if GMAIL_API_ENABLED
+    else "django.core.mail.backends.smtp.EmailBackend"
+    if MAILER_MAIL and LOCAL_MODE
     else "django.core.mail.backends.console.EmailBackend"
 )
-EMAIL_HOST = os.environ.get("MAILER_ADDRESS", "smtp.gmail.com").strip()
+
+# SMTP fallback for local development.
+EMAIL_HOST = os.environ.get(
+    "MAILER_ADDRESS", "smtp.gmail.com"
+).strip()
+
 EMAIL_PORT = int(os.environ.get("MAILER_PORT", "587"))
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = MAILER_MAIL
 EMAIL_HOST_PASSWORD = os.environ.get("MAILER_PASS", "").replace(" ", "")
 EMAIL_TIMEOUT = 10
-EMAIL_FROM_ADDRESS = os.environ.get("EMAIL_FROM_ADDRESS", "").strip() or MAILER_MAIL
-DEFAULT_FROM_EMAIL = f'{os.environ.get("MAILER_FROM_NAME", "Alert").strip()} <{EMAIL_FROM_ADDRESS or "noreply@localhost"}>'
-# Comma-separated recipients; defaults to the sender mailbox.
-LOW_BATTERY_ALERT_TO = env_list("LOW_BATTERY_ALERT_TO", EMAIL_FROM_ADDRESS)
+
+EMAIL_FROM_ADDRESS = (
+    GMAIL_SENDER_EMAIL
+    or os.environ.get("EMAIL_FROM_ADDRESS", "").strip()
+    or MAILER_MAIL
+)
+
+MAILER_FROM_NAME = os.environ.get(
+    "MAILER_FROM_NAME", "Alert"
+).strip()
+
+DEFAULT_FROM_EMAIL = (
+    f'{MAILER_FROM_NAME} '
+    f'<{EMAIL_FROM_ADDRESS or "noreply@localhost"}>'
+)
+
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+
+LOW_BATTERY_ALERT_TO = env_list("LOW_BATTERY_ALERT_TO", EMAIL_FROM_ADDRESS,)
 
 DEFAULT_RESET_ORIGIN = f"https://{RENDER_HOST}" if RENDER_HOST and WHITENOISE_ROOT else "http://127.0.0.1:5173"
-PASSWORD_RESET_URL = os.environ.get("PASSWORD_RESET_URL", f"{DEFAULT_RESET_ORIGIN}/reset-password").strip()
+PASSWORD_RESET_URL = os.environ.get(
+    "PASSWORD_RESET_URL", f"{DEFAULT_RESET_ORIGIN}/reset-password").strip()
 PASSWORD_RESET_TIMEOUT = 60 * 60
 
 # Simulated shuttle battery (warehouse/simulation.py). Set SHUTTLE_SIMULATION=0 to turn it off.

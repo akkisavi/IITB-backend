@@ -6,3 +6,5 @@ __pycache__/
 .env
 staticfiles/
 .coverage
+credentials.json    
+generate_token.py

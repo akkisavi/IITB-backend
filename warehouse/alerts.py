@@ -23,7 +23,8 @@ log = logging.getLogger(__name__)
 def _remember_old_battery(sender, instance, **kwargs):
     old = None
     if instance.pk:
-        old = Shuttle.objects.filter(pk=instance.pk).values_list("battery_percent", flat=True).first()
+        old = Shuttle.objects.filter(pk=instance.pk).values_list(
+            "battery_percent", flat=True).first()
     instance._old_battery = old
 
 
@@ -41,8 +42,16 @@ def _alert_on_low_battery(sender, instance, created, **kwargs):
 def _send_in_background(identifier, battery, recipients=None, test=False):
     # Automatic email can take seconds; don't make a read or save wait for it.
     args = (identifier, battery, recipients, test)
-    if settings.EMAIL_BACKEND in ("django.core.mail.backends.smtp.EmailBackend", "warehouse.mail_backend.ResendEmailBackend"):
-        threading.Thread(target=send_low_battery_alert, args=args, daemon=True).start()
+
+    if settings.EMAIL_BACKEND in (
+        "django.core.mail.backends.smtp.EmailBackend",
+        "warehouse.mail_backend.GmailEmailBackend",
+    ):
+        threading.Thread(
+            target=send_low_battery_alert,
+            args=args,
+            daemon=True,
+        ).start()
     else:
         send_low_battery_alert(*args)
 
@@ -50,7 +59,8 @@ def _send_in_background(identifier, battery, recipients=None, test=False):
 def send_low_battery_alert(identifier, battery, recipients=None, test=False):
     recipients = recipients or settings.LOW_BATTERY_ALERT_TO
     if not recipients:
-        log.warning("Low battery on %s (%s%%) but LOW_BATTERY_ALERT_TO is empty", identifier, battery)
+        log.warning(
+            "Low battery on %s (%s%%) but LOW_BATTERY_ALERT_TO is empty", identifier, battery)
         return False
     try:
         sent = send_mail(
@@ -61,10 +71,12 @@ def send_low_battery_alert(identifier, battery, recipients=None, test=False):
             ),
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=recipients,
-            html_message=low_battery_email(identifier, battery, Shuttle.LOW_BATTERY_THRESHOLD, test),
+            html_message=low_battery_email(
+                identifier, battery, Shuttle.LOW_BATTERY_THRESHOLD, test),
         )
         if sent:
-            log.info("Low-battery alert accepted for %s to %s", identifier, recipients)
+            log.info("Low-battery alert accepted for %s to %s",
+                     identifier, recipients)
         return bool(sent)
     except Exception:
         log.exception("Failed to send low-battery alert for %s", identifier)

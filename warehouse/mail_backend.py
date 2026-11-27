@@ -1,50 +1,74 @@
-"""Django email backend using Resend's HTTPS API."""
-import json
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+"""Django email backend using Gmail's HTTPS API."""
+
+import base64
 
 from django.conf import settings
 from django.core.mail.backends.base import BaseEmailBackend
 
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-class ResendEmailBackend(BaseEmailBackend):
+
+class GmailEmailBackend(BaseEmailBackend):
+
     def send_messages(self, email_messages):
         if not email_messages:
             return 0
+
         sent = 0
-        for message in email_messages:
-            html = next((body for body, mime_type in message.alternatives if mime_type == "text/html"), None)
-            payload = {
-                "from": message.from_email,
-                "to": message.to,
-                "subject": message.subject,
-                "text": message.body,
-            }
-            if html:
-                payload["html"] = html
-            request = Request(
-                "https://api.resend.com/emails",
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Authorization": f"Bearer {settings.RESEND_API_KEY}",
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": "WarehouseConsole/1.0",
-                },
-                method="POST",
+
+        try:
+            credentials = Credentials(
+                token=None,
+                refresh_token=settings.GMAIL_REFRESH_TOKEN,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=settings.GMAIL_CLIENT_ID,
+                client_secret=settings.GMAIL_CLIENT_SECRET,
+                scopes=[
+                    "https://www.googleapis.com/auth/gmail.send"
+                ],
             )
-            try:
-                with urlopen(request, timeout=10) as response:
-                    if response.status not in (200, 201):
-                        raise OSError(f"Resend returned HTTP {response.status}")
-            except HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")[:1000]
-                if self.fail_silently:
-                    return sent
-                raise OSError(f"Resend returned HTTP {exc.code}: {detail}") from exc
-            except (OSError, URLError):
-                if self.fail_silently:
-                    return sent
+
+            service = build(
+                "gmail",
+                "v1",
+                credentials=credentials,
+                cache_discovery=False,
+            )
+
+            for message in email_messages:
+                if not message.recipients():
+                    continue
+
+                message.from_email = settings.GMAIL_SENDER_EMAIL
+
+                mime_message = message.message()
+
+                if message.bcc:
+                    mime_message["Bcc"] = ", ".join(message.bcc)
+
+                raw_message = base64.urlsafe_b64encode(
+                    mime_message.as_bytes()
+                ).decode("utf-8")
+
+                try:
+                    service.users().messages().send(
+                        userId="me",
+                        body={"raw": raw_message},
+                    ).execute()
+
+                    sent += 1
+
+                except HttpError as exc:
+                    if not self.fail_silently:
+                        raise OSError(
+                            f"Gmail API returned an error: {exc}"
+                        ) from exc
+
+        except Exception:
+            if not self.fail_silently:
                 raise
-            sent += 1
+
         return sent
