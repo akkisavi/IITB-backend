@@ -8,3 +8,6 @@ __pycache__/
 staticfiles/
 credentials.json
 token.json
+.coverage
+generate_token.py
+*.sqlite3-journal
