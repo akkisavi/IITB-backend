@@ -670,8 +670,10 @@ class SeedTests(APITestCase):
     def test_seed_idempotent(self):
         with mock.patch.dict(os.environ, ENV):
             out1, out2 = StringIO(), StringIO()
-            call_command("seed_demo", stdout=out1)
-            call_command("seed_demo", stdout=out2)
+            call_command("seed_demo", "--require-accounts", stdout=out1)
+            call_command("seed_demo_history", stdout=out1)
+            call_command("seed_demo", "--require-accounts", stdout=out2)
+            call_command("seed_demo_history", stdout=out2)
         for out in (out1.getvalue(), out2.getvalue()):
             for pw in ENV.values():
                 if "Pass" in pw:
@@ -679,13 +681,9 @@ class SeedTests(APITestCase):
         self.assertEqual(User.objects.filter(username__in=["demo_admin", "demo_auditor", "custom_tech"]).count(), 3)
         self.assertEqual(User.objects.count(), 3)
         self.assertEqual(Location.objects.count(), 25)
-        self.assertEqual(Pallet.objects.count(), 5)
-        self.assertEqual(OperationLog.objects.count(), 5)
-        self.assertEqual(DailyOccupancySnapshot.objects.count(), 7)
-        today = timezone.localdate()
-        self.assertEqual(DailyOccupancySnapshot.objects.get(date=today - timedelta(days=6)).occupied, 6)
-        self.assertEqual(DailyOccupancySnapshot.objects.get(date=today - timedelta(days=1)).occupied, 11)
-        self.assertEqual(DailyOccupancySnapshot.objects.get(date=today).occupied, 5)
+        self.assertEqual(Pallet.objects.count(), 11)
+        self.assertEqual(Pallet.objects.filter(status=Pallet.STATUS_ACTIVE).count(), 5)
+        self.assertEqual(OperationLog.objects.count(), 17)
         tech = User.objects.get(username="custom_tech")
         self.assertEqual(tech.profile.role, "technician")
         self.assertTrue(tech.check_password("Seed-Tech-Pass-1"))
@@ -701,6 +699,16 @@ class SeedTests(APITestCase):
         self.assertIn("Skipping demo_admin: EVAL_ADMIN_PASSWORD not set.", out.getvalue())
         self.assertEqual(User.objects.count(), 0)
         self.assertEqual(Pallet.objects.count(), 5)
+
+    def test_hosted_seed_requires_all_account_passwords_before_writing(self):
+        from django.core.management.base import CommandError
+
+        clean = {k: v for k, v in os.environ.items() if not k.startswith("EVAL_")}
+        with mock.patch.dict(os.environ, clean, clear=True):
+            with self.assertRaisesMessage(CommandError, "EVAL_ADMIN_PASSWORD"):
+                call_command("seed_demo", "--require-accounts", stdout=StringIO())
+        self.assertEqual(User.objects.count(), 0)
+        self.assertEqual(Pallet.objects.count(), 0)
 
     def test_reset_requires_flag(self):
         from django.core.management.base import CommandError

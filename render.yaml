@@ -1,4 +1,10 @@
-# Render Blueprint (free plan, no card). Database: SQLite file at SQLITE_PATH.
+# Render Blueprint. A free PostgreSQL database expires after 30 days.
+databases:
+  - name: warehouse-db
+    plan: free
+    databaseName: warehouse
+    user: warehouse
+
 services:
   - type: web
     name: warehouse-api
@@ -6,7 +12,7 @@ services:
     plan: free
     rootDir: warehouse-api
     buildCommand: bash build.sh
-    startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    startCommand: bash start.sh
     healthCheckPath: /health/
     envVars:
       - key: PYTHON_VERSION
@@ -21,8 +27,10 @@ services:
         sync: false   # e.g. https://warehouse-ui.vercel.app
       - key: CSRF_TRUSTED_ORIGINS
         sync: false
-      - key: SQLITE_PATH
-        value: /opt/render/project/src/db.sqlite3
+      - key: DATABASE_URL
+        fromDatabase:
+          name: warehouse-db
+          property: connectionString
       - key: EVAL_ADMIN_PASSWORD
         sync: false
       - key: EVAL_AUDITOR_PASSWORD

@@ -1,6 +1,7 @@
 """Django settings for warehouse-api. All deploy-specific values come from env vars (SPEC 0.1)."""
 import os
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -107,13 +108,34 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": os.environ.get("SQLITE_PATH", "").strip() or str(BASE_DIR / "db.sqlite3"),
-        "OPTIONS": {"timeout": 20},
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if DATABASE_URL:
+    # Render supplies the internal PostgreSQL URL; local development stays on SQLite.
+    database_uri = urlsplit(DATABASE_URL)
+    if database_uri.scheme not in ("postgres", "postgresql") or not all(
+        (database_uri.hostname, database_uri.username, database_uri.path.lstrip("/"))
+    ):
+        raise ImproperlyConfigured("DATABASE_URL must be a PostgreSQL connection URL.")
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": unquote(database_uri.path.lstrip("/")),
+            "USER": unquote(database_uri.username),
+            "PASSWORD": unquote(database_uri.password or ""),
+            "HOST": database_uri.hostname,
+            "PORT": database_uri.port or 5432,
+            "OPTIONS": dict(parse_qsl(database_uri.query)),
+            "CONN_MAX_AGE": 60,
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.environ.get("SQLITE_PATH", "").strip() or str(BASE_DIR / "db.sqlite3"),
+            "OPTIONS": {"timeout": 20},
+        }
+    }
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

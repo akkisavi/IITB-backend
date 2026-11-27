@@ -2,7 +2,7 @@
 import os
 import re
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from accounts.models import UserProfile
@@ -23,7 +23,18 @@ SAMPLE_PALLETS = [
 class Command(BaseCommand):
     help = "Create/update demo accounts from EVAL_* env vars and seed sample warehouse data (idempotent)."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--require-accounts", action="store_true",
+            help="Fail before seeding if any demo account password is missing (for hosted deploys).",
+        )
+
     def handle(self, *args, **options):
+        if options["require_accounts"]:
+            missing = [f"EVAL_{role.upper()}_PASSWORD" for role in ROLES
+                       if not os.environ.get(f"EVAL_{role.upper()}_PASSWORD")]
+            if missing:
+                raise CommandError("Missing required demo account environment variables: " + ", ".join(missing))
         User = get_user_model()
         accounts = self._seed_accounts(User)
 

@@ -6,8 +6,8 @@ Django REST Framework API for the Warehouse Management System. Main docs (overvi
 - Python **3.12** (see `.python-version`)
 - Django 5.1, DRF (token auth), django-cors-headers, gunicorn, whitenoise
 
-## Database: SQLite
-The API uses one SQLite file, at `SQLITE_PATH` (default `./db.sqlite3`), both locally and when hosted. `migrate` creates it if it does not exist.
+## Database
+Local development uses SQLite at `SQLITE_PATH` (default `./db.sqlite3`). Set `DATABASE_URL` to a PostgreSQL connection URL for the hosted service. The Render Blueprint creates a Postgres database and supplies its internal URL. For an existing manually configured Render service, create a Render Postgres database and set the service's `DATABASE_URL` to its internal URL before deploying this version.
 
 ## Local setup
 ```powershell
@@ -37,7 +37,8 @@ Readiness: `GET /health/` returns `{"status":"ok"}` without auth. `.env.example`
 ## Commands
 | Command | Effect |
 |---|---|
-| `python manage.py seed_demo` | Idempotent. Creates/updates demo users from `EVAL_*` (skips a role whose password is unset), ensures 25 locations and shuttle `SH-01`, adds sample pallets only to an empty DB, fills missing sample history for the previous 6 days, upserts today's live snapshot. Never deletes data. |
+| `python manage.py seed_demo` | Idempotent. Creates/updates demo users from `EVAL_*` (skips a role whose password is unset), ensures 25 locations and shuttle `SH-01`, and adds five sample pallets only to an empty DB. Never deletes data. Add `--require-accounts` to fail if a password is missing. |
+| `python manage.py seed_demo_history` | Adds six days of sample load/unload activity to an untouched demo warehouse. Safe to run again; it skips changed or already seeded stock. |
 | `python manage.py reset_demo --yes-i-am-sure` | Destructive: deletes pallets, operation logs and snapshots (not users), then reseeds. Refuses without the flag, and refuses on a hosted deploy (`DJANGO_ALLOWED_HOSTS` not local) unless `--allow-remote` is also passed. |
 | `python manage.py test` | API tests. |
 
@@ -46,7 +47,8 @@ Readiness: `GET /health/` returns `{"status":"ok"}` without auth. `.env.example`
 ## Environment variables
 | Var | Default | Notes |
 |---|---|---|
-| `SQLITE_PATH` | `./db.sqlite3` | Database file |
+| `SQLITE_PATH` | `./db.sqlite3` | Local SQLite file when `DATABASE_URL` is unset |
+| `DATABASE_URL` | unset | PostgreSQL connection URL; use Render's internal URL in production |
 | `DJANGO_SECRET_KEY` | dev value in local mode or with `DJANGO_DEBUG=1` | Required when hosted |
 | `DJANGO_DEBUG` | `0` | |
 | `DJANGO_ALLOWED_HOSTS` | `127.0.0.1,localhost` | comma list; any other host means hosted mode |
@@ -62,22 +64,22 @@ Readiness: `GET /health/` returns `{"status":"ok"}` without auth. `.env.example`
 ## Local vs hosted
 | | Local / evaluation | Hosted |
 |---|---|---|
-| DB | SQLite file (`SQLITE_PATH`) | SQLite file on the Render instance |
-| Concurrency | SQLite single-writer lock + unique constraints | Same |
+| DB | SQLite file (`SQLITE_PATH`) | PostgreSQL via `DATABASE_URL` |
+| Concurrency | SQLite single-writer lock + unique constraints | PostgreSQL transactions + unique constraints |
 | Server | `runserver` | gunicorn on Render free web service |
 | Availability | always on | Sleeps after 15 min idle; first request takes about a minute. |
 
 ## Deployment (free, no payment card)
-Stack: **Render free web service** (API, SQLite) + **Vercel Hobby** (UI).
+Stack: **Render web service and Postgres** (API and database) + **Vercel Hobby** (UI). Render's free Postgres database expires 30 days after creation; upgrade it before expiry if the data must remain available.
 
 Render free web services block outbound SMTP ports 25, 465 and 587. To send email there, add a verified sending domain in Resend, then set `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS` and `LOW_BATTERY_ALERT_TO` in the Render service environment and redeploy. `EMAIL_FROM_ADDRESS` must use the verified domain. The Shuttle test alert reports an error if the provider rejects the send; a success means the provider accepted it, not that the recipient inbox has delivered it.
 
-**Data persistence:** Render's free filesystem is ephemeral. The build runs `migrate` and `seed_demo`, so every deploy, restart or wake from sleep starts again from the seeded demo data, and changes made through the app (loads, unloads, new users) are lost. For data that must last, attach a persistent disk (paid) and point `SQLITE_PATH` at it.
+**Data persistence:** The build and `start.sh` run migrations and the demo seed. On an empty Postgres database, this creates three accounts from the `EVAL_*` environment variables, 25 locations, one shuttle, five live pallets, and six days of sample movements. On an existing database, it preserves warehouse changes and updates the demo account passwords from the environment. Switching from the old SQLite deployment does not copy existing live data. Export that data first if it must be kept.
 
-Checklist (the owner must sign in; nothing is automated):
+Deployment checklist:
 1. Push this repo to a public GitHub repository.
-2. **Render** (render.com, sign in with GitHub): New > Blueprint and pick the repo (uses `render.yaml`). Or New > Web Service: runtime Python, plan Free, build `bash build.sh`, start `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT`, health check path `/health/`.
+2. **Render** (render.com, sign in with GitHub): New > Blueprint and pick the repo (uses `render.yaml`). For an existing Web Service, create a Postgres database in the same region, set `DATABASE_URL` to its internal URL, use build `bash build.sh` and start `bash start.sh`, and keep health check `/health/`.
 3. Set env vars: `DJANGO_SECRET_KEY` (random; the Blueprint generates it), `DJANGO_DEBUG=0`, `DJANGO_ALLOWED_HOSTS=<service>.onrender.com`, and three different disposable passwords `EVAL_ADMIN_PASSWORD`, `EVAL_AUDITOR_PASSWORD`, `EVAL_TECHNICIAN_PASSWORD` (the same values go in the submission form).
-4. Deploy. The build runs `collectstatic`, `migrate` and `seed_demo` (Render's pre-deploy command is paid-only, so these run in the build). Check `https://<service>.onrender.com/health/`.
+4. Deploy. The build and startup run migrations and demo seeding. The deployment fails with a named missing variable if any `EVAL_*_PASSWORD` is unset. Check `https://<service>.onrender.com/health/`.
 5. Deploy the UI (see UI README), then set `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` to the Vercel URL (`https://<project>.vercel.app`, no trailing slash) and run Manual Deploy on Render.
 6. Optional: a free uptime pinger reduces cold starts. Not required; the brief allows sleep.
