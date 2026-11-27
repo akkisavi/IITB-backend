@@ -46,6 +46,10 @@ def env_list(name, default=""):
 DEBUG = env_bool("DJANGO_DEBUG", False)
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
+# Render sets RENDER_EXTERNAL_HOSTNAME to the service's own *.onrender.com name; always accept it.
+RENDER_HOST = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
+if RENDER_HOST and RENDER_HOST not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(RENDER_HOST)
 # Local mode = only served on this machine. A hosted deploy sets DJANGO_ALLOWED_HOSTS to its domain.
 LOCAL_MODE = all(h in ("127.0.0.1", "localhost") for h in ALLOWED_HOSTS)
 

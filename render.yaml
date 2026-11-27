@@ -15,7 +15,7 @@ services:
       - key: DJANGO_SECRET_KEY
         generateValue: true
       - key: DJANGO_ALLOWED_HOSTS
-        value: warehouse-api.onrender.com
+        value: iitb-zeip.onrender.com
       - key: CORS_ALLOWED_ORIGINS
         sync: false   # e.g. https://warehouse-ui.vercel.app
       - key: CSRF_TRUSTED_ORIGINS
