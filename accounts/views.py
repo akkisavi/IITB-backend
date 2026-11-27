@@ -5,7 +5,7 @@ from django.contrib.auth.models import update_last_login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.authtoken.models import Token
@@ -92,6 +92,48 @@ class LogoutView(APIView):
 class MeView(APIView):
     def get(self, request):
         return Response(me_data(request.user))
+
+
+class ProfileView(APIView):
+    """The signed-in user's own account details and recent stock movements."""
+
+    def get(self, request):
+        from warehouse.models import OperationLog
+        from warehouse.serializers import operation_data
+
+        ops = OperationLog.objects.filter(user=request.user)
+        counts = {row["op_type"]: row["n"] for row in ops.values("op_type").annotate(n=Count("id"))}
+        recent = ops.select_related("pallet").order_by("-created_at", "-id")[:10]
+        return Response({
+            **user_data(request.user),
+            "activity": {
+                "loads": counts.get(OperationLog.LOAD, 0),
+                "unloads": counts.get(OperationLog.UNLOAD, 0),
+                "recent": [operation_data(o) for o in recent],
+            },
+        })
+
+
+class ChangePasswordView(APIView):
+    """Change your own password. Other sessions are signed out; this one gets a fresh token."""
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        current = data.get("current_password")
+        new = data.get("new_password")
+        if not isinstance(current, str) or not request.user.check_password(current):
+            field_errors({"current_password": ["Current password is incorrect."]})
+        errs = password_errors(new, request.user)
+        if not errs and new == current:
+            errs = ["New password must be different from the current one."]
+        if errs:
+            field_errors({"new_password": errs})
+        with transaction.atomic():
+            request.user.set_password(new)
+            request.user.save(update_fields=["password"])
+            Token.objects.filter(user=request.user).delete()
+            token = Token.objects.create(user=request.user)
+        return Response({"token": token.key})
 
 
 def _would_remove_admin(target, new_role=None, new_active=None):

@@ -258,6 +258,43 @@ class LoadUnloadTests(BaseAPITest):
         self.assertEqual((res["identifier"], res["status"], res["battery_percent"]), ("SH-01", "idle", 87))
 
 
+class ProfileTests(BaseAPITest):
+    def test_profile_shows_account_and_own_activity(self):
+        self.as_user(self.tech)
+        self.assertEqual(self.load().status_code, 201)
+        self.as_user(self.admin)
+        self.assertEqual(self.load(location="D4", pallet_number="PLT-0100", barcode="40012345678918").status_code, 201)
+        self.as_user(self.tech)
+        res = self.client.get("/api/auth/profile/")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual((data["username"], data["role"]), ("tech1", "technician"))
+        self.assertEqual((data["activity"]["loads"], data["activity"]["unloads"]), (1, 0))
+        self.assertEqual(len(data["activity"]["recent"]), 1)
+
+    def test_profile_requires_login(self):
+        self.anon()
+        self.assertEqual(self.client.get("/api/auth/profile/").status_code, 401)
+
+    def test_change_password(self):
+        self.as_user(self.auditor)
+        old_token = Token.objects.get(user=self.auditor).key
+        bad = self.client.post("/api/auth/change-password/", {"current_password": "wrong", "new_password": "Another-pass-123"}, format="json")
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("current_password", bad.json()["errors"])
+        short = self.client.post("/api/auth/change-password/", {"current_password": PW, "new_password": "short"}, format="json")
+        self.assertIn("new_password", short.json()["errors"])
+        same = self.client.post("/api/auth/change-password/", {"current_password": PW, "new_password": PW}, format="json")
+        self.assertIn("new_password", same.json()["errors"])
+        ok = self.client.post("/api/auth/change-password/", {"current_password": PW, "new_password": "Another-pass-123"}, format="json")
+        self.assertEqual(ok.status_code, 200)
+        new_token = ok.json()["token"]
+        self.assertNotEqual(new_token, old_token)
+        self.assertFalse(Token.objects.filter(key=old_token).exists())
+        self.auditor.refresh_from_db()
+        self.assertTrue(self.auditor.check_password("Another-pass-123"))
+
+
 class ShuttleBatteryTests(BaseAPITest):
     def test_operator_updates_battery_and_status(self):
         self.as_user(self.tech)

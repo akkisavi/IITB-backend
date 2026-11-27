@@ -22,6 +22,15 @@ python manage.py runserver 127.0.0.1:8000 --noreload
 ```
 Readiness: `GET /health/` returns `{"status":"ok"}` without auth. `.env.example` lists every variable with placeholders. While `DJANGO_ALLOWED_HOSTS` holds only `127.0.0.1`/`localhost` the API runs in local mode: a dev secret key is used if `DJANGO_SECRET_KEY` is unset, and any localhost UI origin is allowed by CORS.
 
+### Demo accounts
+| Role | Hosted username | Local setup reads |
+|---|---|---|
+| Admin | `demo_admin` | `EVAL_ADMIN_USERNAME`, `EVAL_ADMIN_PASSWORD` |
+| Auditor | `demo_auditor` | `EVAL_AUDITOR_USERNAME`, `EVAL_AUDITOR_PASSWORD` |
+| Technician | `demo_technician` | `EVAL_TECHNICIAN_USERNAME`, `EVAL_TECHNICIAN_PASSWORD` |
+
+`seed_demo` creates or updates each account from these variables (a role whose password is unset is skipped). Usernames default to the hosted ones above. Never commit the passwords.
+
 ### Uniqueness and concurrency
 "Pallet number / barcode unique among *active* pallets" is a real database constraint: `active_pallet_number` and `active_barcode` carry a unique index and are cleared (NULL) on unload. **One pallet per location** is a one-to-one column. SQLite allows one writer at a time (20 s busy timeout), so two simultaneous loads into the same slot end in one success and one `409`; a Playwright test checks this.
 
