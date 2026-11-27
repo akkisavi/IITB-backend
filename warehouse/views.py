@@ -19,6 +19,7 @@ from .serializers import (
     iso, location_data, maintenance_data, operation_data, pallet_data, shuttle_data, validate_bulk_unload,
     validate_maintenance, validate_shuttle_update,
 )
+from .simulation import simulate
 from .services import bulk_unload, latest_operation, load_pallet, undo_operation, unload_pallet
 
 
@@ -194,15 +195,20 @@ class ShuttleView(APIView):
         return [IsOperator()] if self.request.method == "PATCH" else super().get_permissions()
 
     def get(self, request):
-        return Response(shuttle_data(_shuttle()))
+        return Response(shuttle_data(simulate(_shuttle())))
 
     def patch(self, request):
         changes = validate_shuttle_update(request.data)
+        test_to = changes.pop("test_alert_email", None)
         shuttle = _shuttle()
         for field, value in changes.items():
             setattr(shuttle, field, value)
+        shuttle._test_alert_to = test_to
         shuttle.save(update_fields=[*changes, "updated_at"])
-        return Response(shuttle_data(shuttle))
+        data = shuttle_data(shuttle)
+        if test_to:
+            data["test_alert_sent_to"] = test_to
+        return Response(data)
 
 
 class ShuttleMaintenanceView(APIView):

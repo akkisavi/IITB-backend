@@ -332,6 +332,74 @@ class ShuttleBatteryTests(BaseAPITest):
         self.assertEqual(len(mail.outbox), 2)
 
 
+class TestAlertEmailTests(BaseAPITest):
+    @override_settings(LOW_BATTERY_ALERT_TO=["ops@example.com"],
+                       EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_test_email_gets_alert_even_when_already_low(self):
+        from django.core import mail
+        self.as_user(self.tech)
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.patch("/api/shuttle/", {"battery_percent": 15, "test_alert_email": "tester@example.com"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["test_alert_sent_to"], "tester@example.com")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["tester@example.com"])
+        self.assertTrue(mail.outbox[0].subject.startswith("[Test] "))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.patch("/api/shuttle/", {"battery_percent": 12, "test_alert_email": "tester@example.com"}, format="json")
+        self.assertEqual(len(mail.outbox), 2)
+
+    def test_test_email_validation(self):
+        self.as_user(self.tech)
+        bad = self.client.patch("/api/shuttle/", {"battery_percent": 10, "test_alert_email": "not-an-email"}, format="json")
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("test_alert_email", bad.json()["errors"])
+        high = self.client.patch("/api/shuttle/", {"battery_percent": 50, "test_alert_email": "tester@example.com"}, format="json")
+        self.assertEqual(high.status_code, 400)
+        self.assertIn("test_alert_email", high.json()["errors"])
+
+
+class BatterySimulationTests(BaseAPITest):
+    def age_shuttle(self, seconds, **fields):
+        from warehouse.models import Shuttle
+        Shuttle.objects.update(updated_at=timezone.now() - timedelta(seconds=seconds), **fields)
+
+    def get_shuttle(self):
+        self.as_user(self.auditor)
+        return self.client.get("/api/shuttle/").json()
+
+    def test_busy_drains_and_idle_drains_slower(self):
+        self.age_shuttle(200, status="busy", battery_percent=80)
+        self.assertEqual(self.get_shuttle()["battery_percent"], 70)  # 200 s / 20 s
+        self.age_shuttle(200, status="idle", battery_percent=80)
+        self.assertEqual(self.get_shuttle()["battery_percent"], 78)  # 200 s / 90 s
+
+    def test_low_battery_docks_and_charges_to_idle(self):
+        self.age_shuttle(40, status="busy", battery_percent=12)
+        res = self.get_shuttle()
+        self.assertEqual((res["status"], res["battery_percent"]), ("charging", 10))
+        self.age_shuttle(6 * 95, status="charging", battery_percent=10)
+        res = self.get_shuttle()
+        self.assertEqual((res["status"], res["battery_percent"]), ("idle", 100))
+
+    def test_offline_is_frozen_and_flag_disables(self):
+        self.age_shuttle(1000, status="offline", battery_percent=50)
+        self.assertEqual(self.get_shuttle()["battery_percent"], 50)
+        with override_settings(SHUTTLE_SIMULATION=False):
+            self.age_shuttle(1000, status="busy", battery_percent=50)
+            res = self.get_shuttle()
+            self.assertEqual((res["battery_percent"], res["simulated"]), (50, False))
+
+    @override_settings(LOW_BATTERY_ALERT_TO=["ops@example.com"],
+                       EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_simulated_drop_below_threshold_sends_alert(self):
+        from django.core import mail
+        self.age_shuttle(60, status="busy", battery_percent=21)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(self.get_shuttle()["battery_percent"], 18)
+        self.assertEqual(len(mail.outbox), 1)
+
+
 class PalletHistoryTests(BaseAPITest):
     def test_unloaded_pallet_keeps_storage_location_and_actors(self):
         self.as_user(self.tech)

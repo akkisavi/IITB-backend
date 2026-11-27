@@ -1,6 +1,13 @@
+import logging
 import re
 
+from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.core.validators import validate_email
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.contrib.auth.models import update_last_login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -18,9 +25,11 @@ from warehouse.pagination import StandardPagination
 from warehouse.permissions import IsAdminRole
 from warehouse.serializers import iso
 
+from .auth import start_session
 from .models import Role, UserProfile, active_admin_ids, get_profile, get_role
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,150}$")
 MSG_USERNAME = "Username must be 3-150 characters: letters, digits, _ . -"
@@ -30,6 +39,23 @@ MSG_ROLE = "Role must be admin, auditor or technician."
 MSG_SELF = "You cannot deactivate or demote your own account."
 MSG_LAST_ADMIN = "This change would leave the system without an active admin."
 ROLES = {r.value for r in Role}
+MSG_EMAIL = "Enter a valid email address, or leave it blank."
+
+
+def clean_email(value):
+    """Return (email, error). Blank is allowed."""
+    if value is None:
+        return "", None
+    if not isinstance(value, str):
+        return "", MSG_EMAIL
+    value = value.strip().lower()
+    if not value:
+        return "", None
+    try:
+        validate_email(value)
+    except DjangoValidationError:
+        return "", MSG_EMAIL
+    return value, None
 
 
 def me_data(user):
@@ -40,6 +66,7 @@ def user_data(user):
     return {
         "id": user.id,
         "username": user.username,
+        "email": user.email,
         "role": get_role(user),
         "is_active": user.is_active,
         "is_superuser": user.is_superuser,
@@ -78,9 +105,11 @@ class LoginView(APIView):
         user = authenticate(request, username=username, password=password)
         if user is None or not user.is_active:
             raise ApiError(400, "invalid_credentials", "Invalid username or password.")
+        remember = data.get("remember") is True
         token, _ = Token.objects.get_or_create(user=user)
+        session = start_session(token, remember)
         update_last_login(None, user)
-        return Response({"token": token.key, "user": me_data(user)})
+        return Response({"token": token.key, "user": me_data(user), "expires_at": iso(session.expires_at)})
 
 
 class LogoutView(APIView):
@@ -128,12 +157,77 @@ class ChangePasswordView(APIView):
             errs = ["New password must be different from the current one."]
         if errs:
             field_errors({"new_password": errs})
+        old = getattr(request.auth, "session", None)
+        remember = bool(old and old.remember)
         with transaction.atomic():
             request.user.set_password(new)
             request.user.save(update_fields=["password"])
             Token.objects.filter(user=request.user).delete()
             token = Token.objects.create(user=request.user)
+            start_session(token, remember)
         return Response({"token": token.key})
+
+
+MSG_RESET_SENT = "If that account exists and has an email address, a reset link is on its way."
+MSG_RESET_INVALID = "This reset link is invalid or has expired. Request a new one."
+
+
+class PasswordResetRequestView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        ident = data.get("identifier")
+        ident = ident.strip() if isinstance(ident, str) else ""
+        if not ident:
+            field_errors({"identifier": ["Enter your username or email."]})
+        user = (
+            User.objects.filter(is_active=True)
+            .filter(Q(username__iexact=ident) | Q(email__iexact=ident))
+            .exclude(email="")
+            .first()
+        )
+        if user is not None:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            link = f"{settings.PASSWORD_RESET_URL}?uid={uid}&token={token}"
+            try:
+                send_mail(
+                    "Reset your Warehouse Console password",
+                    f"Hi {user.username},\n\nOpen this link within an hour to choose a new password:\n{link}\n\n"
+                    "If you did not ask for this, ignore this email; your password stays the same.",
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                )
+            except Exception:
+                logger.exception("password reset email failed for user %s", user.pk)
+        return Response({"detail": MSG_RESET_SENT})
+
+
+class PasswordResetConfirmView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        data = request.data if isinstance(request.data, dict) else {}
+        uid, token = data.get("uid"), data.get("token")
+        user = None
+        if isinstance(uid, str) and isinstance(token, str):
+            try:
+                user = User.objects.get(pk=force_str(urlsafe_base64_decode(uid)), is_active=True)
+            except (User.DoesNotExist, ValueError, TypeError, OverflowError):
+                user = None
+        if user is None or not default_token_generator.check_token(user, token):
+            raise ApiError(400, "reset_link_invalid", MSG_RESET_INVALID)
+        errs = password_errors(data.get("password"), user)
+        if errs:
+            field_errors({"password": errs})
+        with transaction.atomic():
+            user.set_password(data["password"])
+            user.save(update_fields=["password"])
+            Token.objects.filter(user=user).delete()
+        return Response({"detail": "Password updated. Sign in with your new password."})
 
 
 def _would_remove_admin(target, new_role=None, new_active=None):
@@ -197,13 +291,16 @@ class UserListCreateView(APIView):
         role = data.get("role")
         if role not in ROLES:
             errors["role"] = [MSG_ROLE]
+        email, email_err = clean_email(data.get("email"))
+        if email_err:
+            errors["email"] = [email_err]
         pw_errs = password_errors(data.get("password"), User(username=username))
         if pw_errs:
             errors["password"] = pw_errs
         if errors:
             field_errors(errors)
         with transaction.atomic():
-            user = User(username=username, is_active=True)
+            user = User(username=username, email=email, is_active=True)
             user.set_password(data["password"])
             user.save()
             UserProfile.objects.update_or_create(user=user, defaults={"role": role})
@@ -213,7 +310,7 @@ class UserListCreateView(APIView):
 
 class UserDetailView(APIView):
     permission_classes = [IsAdminRole]
-    EDITABLE = {"role", "is_active"}
+    EDITABLE = {"role", "is_active", "email"}
 
     def get(self, request, pk):
         return Response(user_data(get_object_or_404(User, pk=pk)))
@@ -229,11 +326,19 @@ class UserDetailView(APIView):
             errors["role"] = [MSG_ROLE]
         if "is_active" in data and not isinstance(new_active, bool):
             errors["is_active"] = ["is_active must be true or false."]
+        new_email = None
+        if "email" in data:
+            new_email, email_err = clean_email(data.get("email"))
+            if email_err:
+                errors["email"] = [email_err]
         if errors:
             field_errors(errors)
         with transaction.atomic():
             target = get_object_or_404(User.objects.select_for_update(), pk=pk)
             _guard_admin_change(request, target, new_role=new_role, new_active=new_active)
+            if new_email is not None and new_email != target.email:
+                target.email = new_email
+                target.save(update_fields=["email"])
             if new_role is not None:
                 profile = get_profile(target)
                 profile.role = new_role

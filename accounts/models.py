@@ -43,3 +43,11 @@ def active_admin_ids(exclude_pk=None):
     if exclude_pk is not None:
         qs = qs.exclude(pk=exclude_pk)
     return set(qs.values_list("pk", flat=True))
+
+
+class TokenSession(models.Model):
+    """Server-side expiry for a DRF token: 7 days with "remember me", otherwise 12 hours."""
+
+    token = models.OneToOneField("authtoken.Token", on_delete=models.CASCADE, related_name="session")
+    remember = models.BooleanField(default=False)
+    expires_at = models.DateTimeField()

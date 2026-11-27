@@ -7,6 +7,28 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _load_env_files():
+    """Local dev convenience: read KEY=VALUE lines from warehouse-api/.env and ../local-dev.env.
+    Variables already set in the real environment always win, so hosted deploys are unaffected."""
+    for path in (BASE_DIR / ".env", BASE_DIR.parent / "local-dev.env"):
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip().removeprefix("export ").strip()
+            val = val.strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+                val = val[1:-1]
+            if key:
+                os.environ.setdefault(key, val)
+
+
+_load_env_files()
+
+
 def env_bool(name, default=False):
     val = os.environ.get(name)
     if val is None or val.strip() == "":
@@ -112,7 +134,7 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.TokenAuthentication"],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.auth.ExpiringTokenAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
@@ -154,3 +176,9 @@ EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = f'{os.environ.get("MAILER_FROM_NAME", "Alert").strip()} <{MAILER_MAIL or "noreply@localhost"}>'
 # Comma-separated recipients; defaults to the sender mailbox.
 LOW_BATTERY_ALERT_TO = env_list("LOW_BATTERY_ALERT_TO", MAILER_MAIL)
+
+PASSWORD_RESET_URL = os.environ.get("PASSWORD_RESET_URL", "http://127.0.0.1:5173/reset-password").strip()
+PASSWORD_RESET_TIMEOUT = 60 * 60
+
+# Simulated shuttle battery (warehouse/simulation.py). Set SHUTTLE_SIMULATION=0 to turn it off.
+SHUTTLE_SIMULATION = env_bool("SHUTTLE_SIMULATION", True)

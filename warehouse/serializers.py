@@ -3,6 +3,9 @@ input rules; the UI mirrors them in src/lib/validate.ts."""
 import re
 from datetime import timezone as dt_timezone
 
+from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from rest_framework import serializers
 
 from .exceptions import field_errors
@@ -159,6 +162,7 @@ def shuttle_data(s: Shuttle):
         "battery_percent": s.battery_percent,
         "low_battery": s.battery_percent < Shuttle.LOW_BATTERY_THRESHOLD,
         "low_battery_threshold": Shuttle.LOW_BATTERY_THRESHOLD,
+        "simulated": getattr(settings, "SHUTTLE_SIMULATION", True),
         "updated_at": iso(s.updated_at),
     }
 
@@ -179,7 +183,11 @@ def validate_maintenance(data):
 
 
 def validate_shuttle_update(data):
-    """PATCH /api/shuttle/: battery_percent (whole number 0-100) and/or status."""
+    """PATCH /api/shuttle/: battery_percent (whole number 0-100) and/or status.
+
+    Optional test_alert_email: with a battery_percent below the threshold, the low-battery alert
+    for this save goes only to that address (for checking that alert email works).
+    """
     if not isinstance(data, dict):
         field_errors({"non_field_errors": ["Send a JSON object."]})
     changes, errors = {}, {}
@@ -195,6 +203,22 @@ def validate_shuttle_update(data):
             errors["status"] = [f"Status must be one of: {', '.join(valid)}."]
         else:
             changes["status"] = data["status"]
+    test_email = data.get("test_alert_email")
+    if test_email not in (None, ""):
+        test_email = test_email.strip() if isinstance(test_email, str) else ""
+        try:
+            validate_email(test_email)
+            if len(test_email) > 254:
+                raise DjangoValidationError("too long")
+        except DjangoValidationError:
+            errors["test_alert_email"] = ["Enter a valid email address."]
+        else:
+            if changes.get("battery_percent", Shuttle.LOW_BATTERY_THRESHOLD) >= Shuttle.LOW_BATTERY_THRESHOLD:
+                errors["test_alert_email"] = [
+                    f"A test alert needs battery_percent below {Shuttle.LOW_BATTERY_THRESHOLD}% in the same update."
+                ]
+            else:
+                changes["test_alert_email"] = test_email
     if not errors and not changes:
         errors["non_field_errors"] = ["Provide battery_percent and/or status."]
     if errors:
