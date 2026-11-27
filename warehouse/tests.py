@@ -389,6 +389,7 @@ class TestAlertEmailTests(BaseAPITest):
         self.assertEqual(res.json()["test_alert_sent_to"], "tester@example.com")
         request = send.call_args.args[0]
         self.assertEqual(request.full_url, "https://api.resend.com/emails")
+        self.assertEqual(request.get_header("User-agent"), "WarehouseConsole/1.0")
         self.assertIn(b'"to": ["tester@example.com"]', request.data)
 
         error = HTTPError("https://api.resend.com/emails", 403, "forbidden", {}, None)
