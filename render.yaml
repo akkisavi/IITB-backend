@@ -4,6 +4,7 @@ services:
     name: warehouse-api
     runtime: python
     plan: free
+    rootDir: warehouse-api
     buildCommand: bash build.sh
     startCommand: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 60
     healthCheckPath: /health/

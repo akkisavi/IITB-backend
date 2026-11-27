@@ -130,6 +130,8 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+FRONTEND_DIST = BASE_DIR.parent / "warehouse-ui" / "dist"
+WHITENOISE_ROOT = str(FRONTEND_DIST) if (FRONTEND_DIST / "index.html").is_file() else None
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
@@ -181,7 +183,8 @@ DEFAULT_FROM_EMAIL = f'{os.environ.get("MAILER_FROM_NAME", "Alert").strip()} <{M
 # Comma-separated recipients; defaults to the sender mailbox.
 LOW_BATTERY_ALERT_TO = env_list("LOW_BATTERY_ALERT_TO", MAILER_MAIL)
 
-PASSWORD_RESET_URL = os.environ.get("PASSWORD_RESET_URL", "http://127.0.0.1:5173/reset-password").strip()
+DEFAULT_RESET_ORIGIN = f"https://{RENDER_HOST}" if RENDER_HOST and WHITENOISE_ROOT else "http://127.0.0.1:5173"
+PASSWORD_RESET_URL = os.environ.get("PASSWORD_RESET_URL", f"{DEFAULT_RESET_ORIGIN}/reset-password").strip()
 PASSWORD_RESET_TIMEOUT = 60 * 60
 
 # Simulated shuttle battery (warehouse/simulation.py). Set SHUTTLE_SIMULATION=0 to turn it off.

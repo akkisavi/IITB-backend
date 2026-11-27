@@ -1,10 +1,24 @@
-from django.urls import path
+from django.conf import settings
+from django.http import FileResponse, Http404
+from django.urls import path, re_path
+from django.views.decorators.http import require_safe
 
 from accounts import views as acc
 from warehouse import views as wh
 
+
+@require_safe
+def frontend(request):
+    try:
+        index = (settings.FRONTEND_DIST / "index.html").open("rb")
+    except FileNotFoundError:
+        if request.path == "/":
+            return wh.RootView.as_view()(request)
+        raise Http404 from None
+    return FileResponse(index, content_type="text/html")
+
 urlpatterns = [
-    path("", wh.RootView.as_view(), name="root"),
+    path("", frontend, name="root"),
     path("health/", wh.HealthView.as_view(), name="health"),
     path("api/auth/login/", acc.LoginView.as_view(), name="login"),
     path("api/auth/logout/", acc.LogoutView.as_view(), name="logout"),
@@ -31,4 +45,5 @@ urlpatterns = [
     path("api/users/", acc.UserListCreateView.as_view(), name="users"),
     path("api/users/<int:pk>/", acc.UserDetailView.as_view(), name="user-detail"),
     path("api/users/<int:pk>/set-password/", acc.UserSetPasswordView.as_view(), name="user-set-password"),
+    re_path(r"^(?:overview|login|forgot-password|reset-password|pallets|shuttle|profile|dashboard|users)/?$", frontend),
 ]
