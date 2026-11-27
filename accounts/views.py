@@ -261,7 +261,7 @@ class UserListCreateView(APIView):
         qs = User.objects.select_related("profile").order_by("username")
         search = qp.get("search", "").strip()
         if search:
-            qs = qs.filter(username__icontains=search)
+            qs = qs.filter(Q(username__icontains=search) | Q(email__icontains=search))
         role = qp.get("role", "").strip().lower()
         if role:
             if role not in ROLES:
