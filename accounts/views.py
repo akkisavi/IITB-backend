@@ -20,6 +20,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from warehouse.emails import password_reset_email
 from warehouse.exceptions import ApiError, field_errors
 from warehouse.pagination import StandardPagination
 from warehouse.permissions import IsAdminRole
@@ -199,6 +200,7 @@ class PasswordResetRequestView(APIView):
                     "If you did not ask for this, ignore this email; your password stays the same.",
                     settings.DEFAULT_FROM_EMAIL,
                     [user.email],
+                    html_message=password_reset_email(user.username, link, settings.PASSWORD_RESET_TIMEOUT // 60),
                 )
             except Exception:
                 logger.exception("password reset email failed for user %s", user.pk)

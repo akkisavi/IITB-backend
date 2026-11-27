@@ -14,6 +14,7 @@ from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 
+from .emails import low_battery_email
 from .models import Shuttle
 
 log = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ def send_low_battery_alert(identifier, battery, recipients=None, test=False):
             ),
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=recipients,
+            html_message=low_battery_email(identifier, battery, Shuttle.LOW_BATTERY_THRESHOLD, test),
         )
         log.info("Low-battery alert sent for %s to %s", identifier, recipients)
         return True
